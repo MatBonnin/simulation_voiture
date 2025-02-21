@@ -1,296 +1,338 @@
 // js/simulation.js
 
 import Car from './car.js';
-import TrafficLight from './trafficLight.js';
+
+// Nouvelle classe pour gérer le cycle d'un feu d'intersection de manière complémentaire
+class IntersectionLight {
+  constructor() {
+    // Cycle en 4 phases :
+    // Phase 0 : sens horizontal -> vert, vertical -> rouge (6s)
+    // Phase 1 : sens horizontal -> jaune, vertical -> rouge (2s)
+    // Phase 2 : sens horizontal -> rouge, vertical -> vert (6s)
+    // Phase 3 : sens horizontal -> rouge, vertical -> jaune (2s)
+    this.phases = [
+      { horizontal: 'green', vertical: 'red', duration: 6000 },
+      { horizontal: 'yellow', vertical: 'red', duration: 2000 },
+      { horizontal: 'red', vertical: 'green', duration: 6000 },
+      { horizontal: 'red', vertical: 'yellow', duration: 2000 },
+    ];
+    this.currentPhaseIndex = 0;
+    // Décalage initial aléatoire pour éviter que toutes les intersections ne soient synchronisées
+    this.elapsedTime = Math.random() * this.phases[0].duration;
+  }
+
+  update(deltaMs) {
+    this.elapsedTime += deltaMs;
+    const currentPhase = this.phases[this.currentPhaseIndex];
+    if (this.elapsedTime >= currentPhase.duration) {
+      this.elapsedTime = 0;
+      this.currentPhaseIndex =
+        (this.currentPhaseIndex + 1) % this.phases.length;
+    }
+  }
+
+  get horizontalColor() {
+    return this.phases[this.currentPhaseIndex].horizontal;
+  }
+
+  get verticalColor() {
+    return this.phases[this.currentPhaseIndex].vertical;
+  }
+}
 
 export default class Simulation {
   constructor(canvas, controls) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
 
-    // Récupération des contrôles
+    // Récupération des contrôles utilisateur
     this.controls = controls;
-    // Paramètres réglables
-    this.carInterval = parseInt(controls.carInterval.value); // en ms
-    this.acceleration = parseInt(controls.acceleration.value); // px/s²
-    this.maxSpeed = parseInt(controls.maxSpeed.value); // px/s
+    this.carInterval = parseInt(controls.carInterval.value);
+    this.acceleration = parseInt(controls.acceleration.value);
+    this.maxSpeed = parseInt(controls.maxSpeed.value);
 
-    // Listes des voitures sur chaque route
-    this.carsHorizontal = [];
-    this.carsVertical = [];
+    // Configuration des routes : 4 routes horizontales et 4 routes verticales espacées de manière égale.
+    this.horizontalCount = 4;
+    this.verticalCount = 4;
+    this.horizontalRoads = [];
+    this.verticalRoads = [];
 
-    // Randomisation du feu de départ : on choisit aléatoirement quelle route commence en vert
-    const randomStart = Math.random() < 0.5;
-    if (randomStart) {
-      // Route horizontale démarre en vert, verticale en rouge
-      this.trafficLightHorizontal = new TrafficLight([
-        { color: 'green', duration: 6000 },
-        { color: 'yellow', duration: 2000 },
-        { color: 'red', duration: 6000 },
-      ]);
-      this.trafficLightVertical = new TrafficLight([
-        { color: 'red', duration: 6000 },
-        { color: 'yellow', duration: 2000 },
-        { color: 'green', duration: 6000 },
-      ]);
-    } else {
-      // Route horizontale démarre en rouge, verticale en vert
-      this.trafficLightHorizontal = new TrafficLight([
-        { color: 'red', duration: 6000 },
-        { color: 'yellow', duration: 2000 },
-        { color: 'green', duration: 6000 },
-      ]);
-      this.trafficLightVertical = new TrafficLight([
-        { color: 'green', duration: 6000 },
-        { color: 'yellow', duration: 2000 },
-        { color: 'red', duration: 6000 },
-      ]);
+    // Calcul des positions des routes horizontales
+    for (let i = 0; i < this.horizontalCount; i++) {
+      const y = (this.canvas.height / (this.horizontalCount + 1)) * (i + 1);
+      this.horizontalRoads.push({ y: y, cars: [], lastSpawnTime: 0 });
+    }
+    // Calcul des positions des routes verticales
+    for (let j = 0; j < this.verticalCount; j++) {
+      const x = (this.canvas.width / (this.verticalCount + 1)) * (j + 1);
+      this.verticalRoads.push({ x: x, cars: [], lastSpawnTime: 0 });
     }
 
-    // Gestion des timers pour l'arrivée des voitures
-    this.lastCarTimeHorizontal = 0;
-    this.lastCarTimeVertical = 0;
+    // Création des intersections (16 au total) : chacune possède un IntersectionLight
+    this.intersections = [];
+    for (let i = 0; i < this.horizontalCount; i++) {
+      for (let j = 0; j < this.verticalCount; j++) {
+        this.intersections.push({
+          x: this.verticalRoads[j].x,
+          y: this.horizontalRoads[i].y,
+          light: new IntersectionLight(),
+        });
+      }
+    }
 
-    // État de la simulation
     this.isRunning = false;
-
-    // Pour la boucle d'animation
     this.lastTimestamp = null;
   }
 
-  // Démarrer la simulation
   start() {
     this.isRunning = true;
     this.lastTimestamp = performance.now();
     requestAnimationFrame(this.loop.bind(this));
   }
 
-  // Arrêter la simulation
   stop() {
     this.isRunning = false;
   }
 
-  // Boucle principale d'animation
   loop(timestamp) {
     if (!this.isRunning) return;
 
-    // Calculer le temps écoulé avant de mettre à jour le timestamp
-    const deltaMs = timestamp - this.lastTimestamp; // en ms
-    const deltaTime = deltaMs / 1000; // en secondes
+    const deltaMs = timestamp - this.lastTimestamp;
+    const deltaTime = deltaMs / 1000;
 
-    // Mettre à jour les paramètres si l'utilisateur les modifie
+    // Mise à jour des paramètres (possibilité de réglages en direct)
     this.carInterval = parseInt(this.controls.carInterval.value);
     this.acceleration = parseInt(this.controls.acceleration.value);
     this.maxSpeed = parseInt(this.controls.maxSpeed.value);
 
-    // Mettre à jour les feux avec le temps écoulé
-    this.trafficLightHorizontal.update(deltaMs);
-    this.trafficLightVertical.update(deltaMs);
+    // Mise à jour de tous les feux d'intersection
+    this.intersections.forEach((inter) => {
+      inter.light.update(deltaMs);
+    });
 
-    // Ajouter de nouvelles voitures aléatoirement depuis les bords
+    // Génération des voitures sur chaque route
     this.spawnCars(timestamp);
 
-    // Mettre à jour la position des voitures
+    // Mise à jour de la position des voitures et gestion du comportement aux intersections
     this.updateCars(deltaTime);
 
-    // Dessiner toute la scène
+    // Dessin de la scène
     this.draw();
 
-    // Mettre à jour le timestamp de la boucle
     this.lastTimestamp = timestamp;
     requestAnimationFrame(this.loop.bind(this));
   }
 
-  // Fonction de création des voitures
   spawnCars(timestamp) {
-    // Pour la route horizontale : les voitures apparaissent avec leur centre aligné sur la ligne horizontale
-    const spawnX = -10; // point de départ sur l'axe X
-    const spawnYHorizontal = this.canvas.height / 2; // aligné sur la ligne horizontale
-    const safeMargin = 30; // marge pour considérer que le spawn est libre
-
-    if (
-      timestamp - this.lastCarTimeHorizontal >
-      this.carInterval + Math.random() * 1000
-    ) {
-      const newCar = new Car(
-        spawnX,
-        spawnYHorizontal,
-        { x: 1, y: 0 },
-        this.acceleration,
-        this.maxSpeed
-      );
-      if (this.carsHorizontal.length > 0) {
-        const lastCar = this.carsHorizontal[this.carsHorizontal.length - 1];
-        // Si la dernière voiture est déjà loin du point de spawn, la nouvelle apparaît depuis le bord
-        if (lastCar.x > spawnX + safeMargin) {
-          newCar.x = spawnX;
-        } else {
-          // Sinon, la voiture se place derrière la dernière voiture
-          newCar.x = lastCar.x - lastCar.safeDistance - lastCar.size * 2;
-        }
+    // Routes horizontales : les voitures apparaissent à gauche et se déplacent vers la droite.
+    this.horizontalRoads.forEach((road) => {
+      if (
+        timestamp - road.lastSpawnTime >
+        this.carInterval + Math.random() * 1000
+      ) {
+        // Chaque voiture apparaît depuis le bord (x = -10) sans tenir compte des voitures déjà présentes
+        const newCar = new Car(
+          -10,
+          road.y,
+          { x: 1, y: 0 },
+          this.acceleration,
+          this.maxSpeed
+        );
+        road.cars.push(newCar);
+        road.lastSpawnTime = timestamp;
       }
-      this.carsHorizontal.push(newCar);
-      this.lastCarTimeHorizontal = timestamp;
-    }
+    });
 
-    // Pour la route verticale : les voitures apparaissent avec leur centre aligné sur la ligne verticale
-    const spawnY = -10; // point de départ sur l'axe Y
-    const spawnXVertical = this.canvas.width / 2; // aligné sur la ligne verticale
-    if (
-      timestamp - this.lastCarTimeVertical >
-      this.carInterval + Math.random() * 1000
-    ) {
-      const newCar = new Car(
-        spawnXVertical,
-        spawnY,
-        { x: 0, y: 1 },
-        this.acceleration,
-        this.maxSpeed
-      );
-      if (this.carsVertical.length > 0) {
-        const lastCar = this.carsVertical[this.carsVertical.length - 1];
-        if (lastCar.y > spawnY + safeMargin) {
-          newCar.y = spawnY;
-        } else {
-          newCar.y = lastCar.y - lastCar.safeDistance - lastCar.size * 2;
-        }
+    // Routes verticales : les voitures apparaissent en haut et se déplacent vers le bas.
+    this.verticalRoads.forEach((road) => {
+      if (
+        timestamp - road.lastSpawnTime >
+        this.carInterval + Math.random() * 1000
+      ) {
+        // Chaque voiture apparaît depuis le bord (y = -10)
+        const newCar = new Car(
+          road.x,
+          -10,
+          { x: 0, y: 1 },
+          this.acceleration,
+          this.maxSpeed
+        );
+        road.cars.push(newCar);
+        road.lastSpawnTime = timestamp;
       }
-      this.carsVertical.push(newCar);
-      this.lastCarTimeVertical = timestamp;
-    }
+    });
   }
 
-  // Mise à jour de la position des voitures
   updateCars(deltaTime) {
-    // Route horizontale
-    for (let i = 0; i < this.carsHorizontal.length; i++) {
-      const car = this.carsHorizontal[i];
-      // Si le feu horizontal est rouge ou jaune et que la voiture approche de l'intersection, elle s'arrête
-      if (
-        (this.trafficLightHorizontal.currentColor === 'red' ||
-          this.trafficLightHorizontal.currentColor === 'yellow') &&
-        car.x + car.size >= this.canvas.width / 2 - 30 &&
-        car.x + car.size <= this.canvas.width / 2 + 10
-      ) {
-        car.stop();
-      } else {
-        car.resume();
-      }
-      // Gestion de la file d'attente
-      if (i > 0) {
-        const prevCar = this.carsHorizontal[i - 1];
-        if (prevCar.x - car.x < car.safeDistance + car.size * 2) {
-          car.stop();
+    // Mise à jour pour les routes horizontales
+    this.horizontalRoads.forEach((road) => {
+      road.cars.forEach((car, index) => {
+        // Recherche de la prochaine intersection sur cette route (celle dont l'abscisse est supérieure à celle de la voiture)
+        const intersectionsOnRoad = this.intersections.filter(
+          (inter) => Math.abs(inter.y - road.y) < 1 && inter.x > car.x
+        );
+        let nextIntersection = null;
+        if (intersectionsOnRoad.length > 0) {
+          nextIntersection = intersectionsOnRoad.reduce((prev, curr) =>
+            curr.x - car.x < prev.x - car.x ? curr : prev
+          );
         }
-      }
-      car.update(deltaTime);
-    }
-    // Suppression des voitures ayant quitté le canvas (à droite)
-    this.carsHorizontal = this.carsHorizontal.filter(
-      (car) => car.x - car.size < this.canvas.width
-    );
+        if (
+          nextIntersection &&
+          car.x + car.size >= nextIntersection.x - 30 &&
+          car.x + car.size <= nextIntersection.x + 10
+        ) {
+          // Utilisation de la couleur du feu horizontal (complémentaire)
+          if (
+            nextIntersection.light.horizontalColor === 'red' ||
+            nextIntersection.light.horizontalColor === 'yellow'
+          ) {
+            car.stop();
+          } else {
+            car.resume();
+          }
+        } else {
+          car.resume();
+        }
 
-    // Route verticale
-    for (let i = 0; i < this.carsVertical.length; i++) {
-      const car = this.carsVertical[i];
-      if (
-        (this.trafficLightVertical.currentColor === 'red' ||
-          this.trafficLightVertical.currentColor === 'yellow') &&
-        car.y + car.size >= this.canvas.height / 2 - 30 &&
-        car.y + car.size <= this.canvas.height / 2 + 10
-      ) {
-        car.stop();
-      } else {
-        car.resume();
-      }
-      if (i > 0) {
-        const prevCar = this.carsVertical[i - 1];
-        if (prevCar.y - car.y < car.safeDistance + car.size * 2) {
-          car.stop();
+        // Gestion de la file d'attente
+        if (index > 0) {
+          const prevCar = road.cars[index - 1];
+          if (prevCar.x - car.x < car.safeDistance + car.size * 2) {
+            car.stop();
+          }
         }
-      }
-      car.update(deltaTime);
-    }
-    // Suppression des voitures ayant quitté le canvas (en bas)
-    this.carsVertical = this.carsVertical.filter(
-      (car) => car.y - car.size < this.canvas.height
-    );
+        car.update(deltaTime);
+      });
+      // Suppression des voitures ayant dépassé le bord droit du canvas
+      road.cars = road.cars.filter(
+        (car) => car.x - car.size < this.canvas.width
+      );
+    });
+
+    // Mise à jour pour les routes verticales
+    this.verticalRoads.forEach((road) => {
+      road.cars.forEach((car, index) => {
+        const intersectionsOnRoad = this.intersections.filter(
+          (inter) => Math.abs(inter.x - road.x) < 1 && inter.y > car.y
+        );
+        let nextIntersection = null;
+        if (intersectionsOnRoad.length > 0) {
+          nextIntersection = intersectionsOnRoad.reduce((prev, curr) =>
+            curr.y - car.y < prev.y - car.y ? curr : prev
+          );
+        }
+        if (
+          nextIntersection &&
+          car.y + car.size >= nextIntersection.y - 30 &&
+          car.y + car.size <= nextIntersection.y + 10
+        ) {
+          if (
+            nextIntersection.light.verticalColor === 'red' ||
+            nextIntersection.light.verticalColor === 'yellow'
+          ) {
+            car.stop();
+          } else {
+            car.resume();
+          }
+        } else {
+          car.resume();
+        }
+
+        if (index > 0) {
+          const prevCar = road.cars[index - 1];
+          if (prevCar.y - car.y < car.safeDistance + car.size * 2) {
+            car.stop();
+          }
+        }
+        car.update(deltaTime);
+      });
+      road.cars = road.cars.filter(
+        (car) => car.y - car.size < this.canvas.height
+      );
+    });
   }
 
-  // Dessin de l'ensemble de la scène
   draw() {
-    // Effacer le canvas
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // Dessiner les routes (traits horizontaux et verticaux centrés)
+    // Dessiner les routes horizontales
     this.ctx.strokeStyle = 'gray';
     this.ctx.lineWidth = 4;
-    // Route horizontale
-    this.ctx.beginPath();
-    this.ctx.moveTo(0, this.canvas.height / 2);
-    this.ctx.lineTo(this.canvas.width, this.canvas.height / 2);
-    this.ctx.stroke();
-    // Route verticale
-    this.ctx.beginPath();
-    this.ctx.moveTo(this.canvas.width / 2, 0);
-    this.ctx.lineTo(this.canvas.width / 2, this.canvas.height);
-    this.ctx.stroke();
+    this.horizontalRoads.forEach((road) => {
+      this.ctx.beginPath();
+      this.ctx.moveTo(0, road.y);
+      this.ctx.lineTo(this.canvas.width, road.y);
+      this.ctx.stroke();
+    });
+
+    // Dessiner les routes verticales
+    this.verticalRoads.forEach((road) => {
+      this.ctx.beginPath();
+      this.ctx.moveTo(road.x, 0);
+      this.ctx.lineTo(road.x, this.canvas.height);
+      this.ctx.stroke();
+    });
 
     // Dessiner les voitures
-    this.carsHorizontal.forEach((car) => car.draw(this.ctx));
-    this.carsVertical.forEach((car) => car.draw(this.ctx));
+    this.horizontalRoads.forEach((road) => {
+      road.cars.forEach((car) => car.draw(this.ctx));
+    });
+    this.verticalRoads.forEach((road) => {
+      road.cars.forEach((car) => car.draw(this.ctx));
+    });
 
-    // Dessiner les feux près de l'intersection
-    // Pour la route horizontale, on dessine le feu en orientation horizontale
-    this.drawTrafficLight(
-      this.ctx,
-      this.canvas.width / 2 - 100,
-      this.canvas.height / 2 - 40,
-      this.trafficLightHorizontal.currentColor,
-      'horizontal'
-    );
-    // Pour la route verticale, on laisse le dessin vertical classique
-    this.drawTrafficLight(
-      this.ctx,
-      this.canvas.width / 2 + 20,
-      this.canvas.height / 2 - 70,
-      this.trafficLightVertical.currentColor
-    );
+    // Dessiner les feux aux intersections avec une taille réduite
+    this.intersections.forEach((inter) => {
+      // Feu horizontal (affiché en orientation horizontale, plus petit)
+      this.drawTrafficLight(
+        this.ctx,
+        inter.x - 50,
+        inter.y + 10,
+        inter.light.horizontalColor,
+        'horizontal'
+      );
+      // Feu vertical (affiché en orientation verticale, plus petit)
+      this.drawTrafficLight(
+        this.ctx,
+        inter.x - 20,
+        inter.y - 60,
+        inter.light.verticalColor,
+        'vertical'
+      );
+    });
   }
 
   /**
-   * Dessine un feu tricolore.
-   * @param {CanvasRenderingContext2D} ctx Le contexte de dessin.
-   * @param {number} x La coordonnée x du coin supérieur gauche du boîtier.
-   * @param {number} y La coordonnée y du coin supérieur gauche du boîtier.
-   * @param {string} currentColor La couleur active ('red', 'yellow', 'green').
-   * @param {string} [orientation="vertical"] Orientation du feu ("vertical" ou "horizontal").
+   * Dessine un feu tricolore en fonction de l'orientation avec une taille réduite.
+   * @param {CanvasRenderingContext2D} ctx - Contexte de dessin.
+   * @param {number} x - Coordonnée x du coin supérieur gauche.
+   * @param {number} y - Coordonnée y du coin supérieur gauche.
+   * @param {string} currentColor - La couleur active ('red', 'yellow', 'green').
+   * @param {string} [orientation="vertical"] - "vertical" ou "horizontal".
    */
   drawTrafficLight(ctx, x, y, currentColor, orientation = 'vertical') {
     if (orientation === 'vertical') {
-      // Boîtier vertical
+      // Boîtier réduit : 15 x 40 pixels
       ctx.fillStyle = 'black';
-      ctx.fillRect(x, y, 20, 60);
-
+      ctx.fillRect(x, y, 15, 40);
       const colors = ['red', 'yellow', 'green'];
       for (let i = 0; i < 3; i++) {
         ctx.beginPath();
-        ctx.arc(x + 10, y + 10 + i * 20, 7, 0, Math.PI * 2);
+        ctx.arc(x + 7.5, y + 8 + i * 12, 4, 0, Math.PI * 2);
         ctx.fillStyle = colors[i] === currentColor ? colors[i] : '#555';
         ctx.fill();
         ctx.strokeStyle = 'black';
         ctx.stroke();
       }
     } else if (orientation === 'horizontal') {
-      // Boîtier horizontal
+      // Boîtier réduit : 40 x 15 pixels
       ctx.fillStyle = 'black';
-      ctx.fillRect(x, y, 60, 20);
-
+      ctx.fillRect(x, y, 40, 15);
       const colors = ['red', 'yellow', 'green'];
       for (let i = 0; i < 3; i++) {
         ctx.beginPath();
-        // Chaque cercle est espacé horizontalement
-        ctx.arc(x + 10 + i * 20, y + 10, 7, 0, Math.PI * 2);
+        ctx.arc(x + 8 + i * 12, y + 7.5, 4, 0, Math.PI * 2);
         ctx.fillStyle = colors[i] === currentColor ? colors[i] : '#555';
         ctx.fill();
         ctx.strokeStyle = 'black';

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Simulation Croisement de Routes avec Feu Tricolore</title>
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <h1>Simulation d'Intersection</h1>
+    <!-- Zone de simulation -->
+    <canvas id="simulationCanvas" width="800" height="600"></canvas>
+
+    <!-- Panneau de contrôle -->
+    <div id="controls">
+      <button id="startBtn">Démarrer</button>
+      <button id="stopBtn">Arrêter</button>
+      <!-- Quelques réglages de base -->
+      <div>
+        <label for="carInterval"
+          >Intervalle d'arrivée des voitures (ms) :</label
+        >
+        <input type="number" id="carInterval" value="2000" min="500" />
+      </div>
+      <div>
+        <label for="acceleration">Accélération (px/s²) :</label>
+        <input type="number" id="acceleration" value="50" min="10" />
+      </div>
+      <div>
+        <label for="maxSpeed">Vitesse max (px/s) :</label>
+        <input type="number" id="maxSpeed" value="200" min="50" />
+      </div>
+    </div>
+
+    <!-- Chargement du script principal en tant que module -->
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>
